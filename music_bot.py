@@ -1,0 +1,49 @@
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from telegram import Update
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+TARGET_CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1001234567890"))
+
+class Health(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+    def log_message(self, *args):
+        pass
+
+def run_health_server():
+    port = int(os.environ.get("PORT", 10000))
+    HTTPServer(("0.0.0.0", port), Health).serve_forever()
+
+async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.audio:
+        audio = update.message.audio
+        await context.bot.send_audio(
+            chat_id=TARGET_CHANNEL_ID,
+            audio=audio.file_id,
+            title=audio.title or "",
+            performer=audio.performer or ""
+        )
+        await update.message.reply_text("✅ اهنگ فرستاده شد!")
+    elif update.message.document:
+        await context.bot.send_audio(
+            chat_id=TARGET_CHANNEL_ID,
+            audio=update.message.document.file_id
+        )
+        await update.message.reply_text("✅ اهنگ فرستاده شد!")
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("سلام! اهنگ بفرست 🎵")
+
+def main():
+    threading.Thread(target=run_health_server, daemon=True).start()
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(MessageHandler(filters.AUDIO | filters.Document.ALL, handle_audio))
+    print("Bot started")
+    app.run_polling()
+
+if __name__ == '__main__':
+    main()
