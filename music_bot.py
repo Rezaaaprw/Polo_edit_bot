@@ -63,8 +63,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text("⚠️ این آهنگ قبلاً فرستاده شده!")
         return
 
+    caption = None
+    if audio and audio.title:
+        caption = f"{audio.title} - {audio.performer}" if audio.performer else audio.title
+
     try:
-        await context.bot.send_audio(chat_id=TARGET_CHANNEL_ID, audio=file_id)
+        await context.bot.send_audio(chat_id=TARGET_CHANNEL_ID, audio=file_id, caption=caption)
         await msg.reply_text("✅ اهنگ فرستاده شد!")
     except Exception as e:
         await msg.reply_text(f"❌ نشد بفرستم: {e}")
