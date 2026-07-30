@@ -132,7 +132,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{(audio.performer or '').strip().lower()}"
         )
 
-if key and already_seen(key):
+    if key and already_seen(key):
     pending_counter += 1
     token = str(pending_counter)
 
