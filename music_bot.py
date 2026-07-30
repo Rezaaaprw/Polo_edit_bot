@@ -133,7 +133,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     if key and already_seen(key):
-    pending_counter += 1
+        pending_counter += 1
     token = str(pending_counter)
 
     caption = None
