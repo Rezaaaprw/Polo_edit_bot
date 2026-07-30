@@ -143,3 +143,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+from github_db import load_seen_songs, save_seen_songs
+    
