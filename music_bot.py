@@ -3,7 +3,6 @@ import json
 import base64
 import threading
 import requests
-from datetime import datetime, timedelta, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -24,7 +23,7 @@ def load_seen_songs():
         raw = json.loads(content)
         songs = []
         for item in raw:
-            songs.append({"key": item, "date": None} if isinstance(item, str) else item)
+            songs.append({"key": item} if isinstance(item, str) else item)
         return songs, data["sha"]
     return [], None
 
@@ -69,26 +68,6 @@ async def search_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"• {title} - {performer}" if performer else f"• {title}")
     await update.message.reply_text("✅ اینا رو پیدا کردم:\n" + "\n".join(lines))
 
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.now(timezone.utc)
-    week_ago = now - timedelta(days=7)
-    month_ago = now - timedelta(days=30)
-    this_week = this_month = 0
-    for s in seen_songs:
-        if not s.get("date"):
-            continue
-        try:
-            d = datetime.fromisoformat(s["date"])
-        except ValueError:
-            continue
-        if d >= week_ago:
-            this_week += 1
-        if d >= month_ago:
-            this_month += 1
-    await update.message.reply_text(
-        f"📊 آمار:\nاین هفته: {this_week}\nاین ماه: {this_month}\nکل: {len(seen_songs)}"
-    )
-
 async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global current_sha
     query = update.callback_query
@@ -112,7 +91,7 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if item["key"]:
         try:
-            seen_songs.append({"key": item["key"], "date": datetime.now(timezone.utc).isoformat()})
+            seen_songs.append({"key": item["key"]})
             current_sha = save_seen_songs(seen_songs, current_sha)
         except Exception:
             pass
@@ -154,7 +133,6 @@ def main():
     threading.Thread(target=run_health_server, daemon=True).start()
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("search", search_song))
-    app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CallbackQueryHandler(handle_confirmation))
     app.add_handler(MessageHandler(filters.ALL, handle_message))
     print("Bot started")
