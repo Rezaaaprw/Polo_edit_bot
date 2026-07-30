@@ -98,17 +98,16 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         await query.edit_message_text(f"❌ نشد بفرستم:\n{e}")
         return
-
     if item["key"]:
-    try:
-        success, new_sha = add_song({"key": item["key"]})
+        try:
+            success, new_sha = add_song({"key": item["key"]})
 
-        if success:
-            seen_songs.append({"key": item["key"]})
-            current_sha = new_sha
+            if success:
+                seen_songs.append({"key": item["key"]})
+                current_sha = new_sha
 
-    except Exception:
-        pass
+        except Exception:
+            pass
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
