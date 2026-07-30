@@ -12,7 +12,7 @@ from telegram.ext import (
 )
 
 from config import BOT_TOKEN, CHANNEL_ID, PORT
-from github_db import load_seen_songs, save_seen_songs
+from github_db import load_seen_songs, add_song
 
 
 seen_songs, current_sha = load_seen_songs()
@@ -100,11 +100,15 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if item["key"]:
-        try:
+    try:
+        success, new_sha = add_song({"key": item["key"]})
+
+        if success:
             seen_songs.append({"key": item["key"]})
-            current_sha = save_seen_songs(seen_songs, current_sha)
-        except Exception:
-            pass
+            current_sha = new_sha
+
+    except Exception:
+        pass
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
