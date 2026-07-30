@@ -132,9 +132,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{(audio.performer or '').strip().lower()}"
         )
 
-    if key and already_seen(key):
-        await msg.reply_text("⚠️ این آهنگ قبلاً فرستاده شده!")
-        return
+if key and already_seen(key):
+    pending_counter += 1
+    token = str(pending_counter)
+
+    caption = None
+    if audio and audio.title:
+        caption = (
+            f"{audio.title} - {audio.performer}"
+            if audio.performer
+            else audio.title
+        )
+
+    pending[token] = {
+        "file_id": file_id,
+        "caption": caption,
+        "key": None,
+    }
+
+    keyboard = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton(
+                "🔁 ارسال مجدد",
+                callback_data=f"confirm:{token}"
+            ),
+            InlineKeyboardButton(
+                "❌ لغو",
+                callback_data=f"cancel:{token}"
+            ),
+        ]]
+    )
+
+    await msg.reply_text(
+        "⚠️ این آهنگ قبلاً ارسال شده.\n\nدوباره ارسالش کنم؟",
+        reply_markup=keyboard,
+    )
+
+    return
 
     caption = None
 
