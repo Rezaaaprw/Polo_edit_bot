@@ -15,27 +15,28 @@ HEADERS = {
 def load_seen_songs():
     r = requests.get(GITHUB_API, headers=HEADERS)
 
-    if r.status_code == 200:
-        data = r.json()
-        content = base64.b64decode(data["content"]).decode("utf-8")
-        raw = json.loads(content)
+    if r.status_code != 200:
+        return [], None
 
-        songs = []
+    data = r.json()
 
-        for item in raw:
-            if isinstance(item, str):
-                songs.append({"key": item})
-            else:
-                songs.append(item)
+    content = base64.b64decode(data["content"]).decode("utf-8")
+    raw = json.loads(content)
 
-        return songs, data["sha"]
+    songs = []
 
-    return [], None
+    for item in raw:
+        if isinstance(item, str):
+            songs.append({"key": item})
+        else:
+            songs.append(item)
+
+    return songs, data["sha"]
 
 
 def save_seen_songs(songs, sha):
     content = base64.b64encode(
-        json.dumps(songs, ensure_ascii=False).encode("utf-8")
+        json.dumps(songs, ensure_ascii=False, indent=2).encode("utf-8")
     ).decode("utf-8")
 
     payload = {
@@ -48,4 +49,29 @@ def save_seen_songs(songs, sha):
 
     r = requests.put(GITHUB_API, headers=HEADERS, json=payload)
 
-    return r.json().get("content", {}).get("sha")
+    if r.status_code == 200:
+        return True, r.json()["content"]["sha"]
+
+    return False, None
+
+
+def add_song(song):
+    """
+    با مدیریت Conflict آهنگ را ذخیره می‌کند.
+    """
+
+    for _ in range(3):
+
+        songs, sha = load_seen_songs()
+
+        if any(s["key"] == song["key"] for s in songs):
+            return True, sha
+
+        songs.append(song)
+
+        success, new_sha = save_seen_songs(songs, sha)
+
+        if success:
+            return True, new_sha
+
+    return False, None
