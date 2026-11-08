@@ -1,41 +1,17 @@
 import os
-import json
-import base64
+import asyncio
 import threading
 import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-TARGET_CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_REPO = os.getenv("GITHUB_REPO")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/contents/seen_songs.json"
-HEADERS = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
+GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+MAX_TG_FILE = 20 * 1024 * 1024
 
-def load_seen_songs():
-    r = requests.get(GITHUB_API, headers=HEADERS)
-    if r.status_code == 200:
-        data = r.json()
-        content = base64.b64decode(data["content"]).decode("utf-8")
-        raw = json.loads(content)
-        songs = []
-        for item in raw:
-            songs.append({"key": item} if isinstance(item, str) else item)
-        return songs, data["sha"]
-    return [], None
-
-def save_seen_songs(songs, sha):
-    content = base64.b64encode(json.dumps(songs, ensure_ascii=False).encode("utf-8")).decode("utf-8")
-    payload = {"message": "update seen songs", "content": content}
-    if sha:
-        payload["sha"] = sha
-    r = requests.put(GITHUB_API, headers=HEADERS, json=payload)
-    return r.json().get("content", {}).get("sha")
-
-seen_songs, current_sha = load_seen_songs()
 pending = {}
 pending_counter = 0
 
@@ -50,90 +26,128 @@ def run_health_server():
     port = int(os.environ.get("PORT", 10000))
     HTTPServer(("0.0.0.0", port), Health).serve_forever()
 
-def already_seen(key):
-    return any(s["key"] == key for s in seen_songs)
+def groq_transcribe(data, filename):
+    if not GROQ_API_KEY:
+        raise Exception("GROQ_API_KEY تنظیم نشده")
+    r = requests.post(
+        GROQ_URL,
+        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+        files={"file": (filename, data)},
+        data={"model": "whisper-large-v3-turbo", "response_format": "json"},
+        timeout=120,
+    )
+    if r.status_code != 200:
+        raise Exception(f"Groq {r.status_code}: {r.text[:200]}")
+    return r.json().get("text", "").strip()
 
-async def search_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = " ".join(context.args).strip().lower()
-    if not query:
-        await update.message.reply_text("اسم آهنگ رو بعد از /search بنویس.")
+async def transcribe_and_reply(context, chat_id, file_id, filename, status_msg):
+    try:
+        tg_file = await context.bot.get_file(file_id)
+        data = bytes(await tg_file.download_as_bytearray())
+        text = await asyncio.to_thread(groq_transcribe, data, filename)
+    except Exception as e:
+        await status_msg.edit_text(f"❌ نشد تبدیل کنم: {str(e)[:300]}")
         return
-    matches = [s["key"] for s in seen_songs if query in s["key"]]
-    if not matches:
-        await update.message.reply_text("❌ همچین آهنگی تو لیست نیست.")
+    if not text:
+        await status_msg.edit_text("متنی توی این فایل پیدا نشد.")
         return
-    lines = []
-    for m in matches[:10]:
-        title, _, performer = m.partition("|")
-        lines.append(f"• {title} - {performer}" if performer else f"• {title}")
-    await update.message.reply_text("✅ اینا رو پیدا کردم:\n" + "\n".join(lines))
+    await status_msg.delete()
+    for i in range(0, len(text), 4000):
+        await context.bot.send_message(chat_id=chat_id, text=text[i:i + 4000])
 
-async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global current_sha
+async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     action, _, token = query.data.partition(":")
     item = pending.pop(token, None)
 
     if not item:
-        await query.edit_message_text("⏱ این درخواست منقضی شده، دوباره آهنگ رو بفرست.")
-        return
-    if action == "cancel":
-        await query.edit_message_text("❌ لغو شد.")
+        await query.edit_message_text("⏱ این درخواست منقضی شده، دوباره فایل رو بفرست.")
         return
 
-    try:
-        await context.bot.send_audio(chat_id=TARGET_CHANNEL_ID, audio=item["file_id"], caption=item["caption"])
-        await query.edit_message_text("✅ اهنگ فرستاده شد!")
-    except Exception as e:
-        await query.edit_message_text(f"❌ نشد بفرستم: {e}")
-        return
+    chat_id = query.message.chat_id
 
-    if item["key"]:
+    if action == "plain":
         try:
-            seen_songs.append({"key": item["key"]})
-            current_sha = save_seen_songs(seen_songs, current_sha)
-        except Exception:
-            pass
+            if item["kind"] == "audio":
+                await context.bot.send_audio(chat_id=chat_id, audio=item["file_id"])
+            elif item["kind"] == "voice":
+                await context.bot.send_voice(chat_id=chat_id, voice=item["file_id"])
+            else:
+                await context.bot.send_document(chat_id=chat_id, document=item["file_id"])
+            await query.edit_message_text("✅ بدون کپشن فرستاده شد.")
+        except Exception as e:
+            await query.edit_message_text(f"❌ نشد بفرستم: {e}")
+        return
+
+    if item["size"] and item["size"] > MAX_TG_FILE:
+        await query.edit_message_text("⚠️ فایل بزرگ‌تر از ۲۰ مگابایته و تلگرام اجازه نمی‌ده بات دانلودش کنه.")
+        return
+
+    await query.edit_message_text("⏳ دارم به متن تبدیل می‌کنم...")
+    await transcribe_and_reply(context, chat_id, item["file_id"], item["filename"], query.message)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global pending_counter
     msg = update.message
-    audio = msg.audio
+    if not msg:
+        return
+
     doc = msg.document
 
-    if not (audio or doc):
-        await msg.reply_text(f"آی‌دی این چت: {update.effective_chat.id}")
+    # ویدیو: همیشه مستقیم به متن تبدیل می‌شه
+    video = msg.video or msg.video_note
+    if not video and doc and (doc.mime_type or "").startswith("video/"):
+        video = doc
+    if video:
+        if video.file_size and video.file_size > MAX_TG_FILE:
+            await msg.reply_text("⚠️ فایل بزرگ‌تر از ۲۰ مگابایته و تلگرام اجازه نمی‌ده بات دانلودش کنه.")
+            return
+        status = await msg.reply_text("⏳ دارم به متن تبدیل می‌کنم...")
+        filename = getattr(video, "file_name", None) or "video.mp4"
+        await transcribe_and_reply(context, msg.chat_id, video.file_id, filename, status)
         return
 
-    file_id = audio.file_id if audio else doc.file_id
-    key = None
-    if audio and audio.title:
-        key = f"{audio.title.strip().lower()}|{(audio.performer or '').strip().lower()}"
+    # آهنگ یا ویس: می‌پرسه چیکار کنم
+    kind = None
+    media = None
+    filename = None
+    if msg.audio:
+        kind, media = "audio", msg.audio
+        filename = msg.audio.file_name or "audio.mp3"
+    elif msg.voice:
+        kind, media = "voice", msg.voice
+        filename = "voice.ogg"
+    elif doc and (doc.mime_type or "").startswith("audio/"):
+        kind, media = "document", doc
+        filename = doc.file_name or "audio.mp3"
 
-    if key and already_seen(key):
-        await msg.reply_text("⚠️ این آهنگ قبلاً فرستاده شده!")
+    if not media:
+        await msg.reply_text("آهنگ، ویس یا ویدیو بفرست تا کارش رو انجام بدم.")
         return
 
-    caption = None
-    if audio and audio.title:
-        caption = f"{audio.title} - {audio.performer}" if audio.performer else audio.title
+    if len(pending) > 200:
+        pending.pop(next(iter(pending)))
 
     pending_counter += 1
     token = str(pending_counter)
-    pending[token] = {"file_id": file_id, "caption": caption, "key": key}
+    pending[token] = {
+        "kind": kind,
+        "file_id": media.file_id,
+        "filename": filename,
+        "size": media.file_size,
+    }
 
     keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ بفرست", callback_data=f"confirm:{token}"),
-        InlineKeyboardButton("❌ لغو", callback_data=f"cancel:{token}"),
+        InlineKeyboardButton("📝 استخراج متن", callback_data=f"text:{token}"),
+        InlineKeyboardButton("🎵 بدون کپشن", callback_data=f"plain:{token}"),
     ]])
-    await msg.reply_text("این آهنگ فرستاده بشه؟", reply_markup=keyboard)
+    await msg.reply_text("متنش رو استخراج کنم یا بدون کپشن برات بفرستم؟", reply_markup=keyboard)
 
 def main():
     threading.Thread(target=run_health_server, daemon=True).start()
     app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("search", search_song))
-    app.add_handler(CallbackQueryHandler(handle_confirmation))
+    app.add_handler(CallbackQueryHandler(handle_choice))
     app.add_handler(MessageHandler(filters.ALL, handle_message))
     print("Bot started")
     app.run_polling()
