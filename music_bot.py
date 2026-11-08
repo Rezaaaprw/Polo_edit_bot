@@ -6,8 +6,9 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
+GROQ_API_KEY = (os.getenv("GROQ_API_KEY") or "").strip()
+
 
 GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 MAX_TG_FILE = 20 * 1024 * 1024
