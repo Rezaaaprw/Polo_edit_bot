@@ -9,9 +9,9 @@ from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filt
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 GROQ_API_KEY = (os.getenv("GROQ_API_KEY") or "").strip()
 
-
 GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 MAX_TG_FILE = 20 * 1024 * 1024
+ALLOWED_EXT = ("flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "opus", "wav", "webm")
 
 pending = {}
 pending_counter = 0
@@ -30,6 +30,10 @@ def run_health_server():
 def groq_transcribe(data, filename):
     if not GROQ_API_KEY:
         raise Exception("GROQ_API_KEY تنظیم نشده")
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in ALLOWED_EXT:
+        ext = "mp4"
+    filename = "file." + ext
     r = requests.post(
         GROQ_URL,
         headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
