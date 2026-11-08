@@ -38,7 +38,8 @@ def groq_transcribe(data, filename):
         GROQ_URL,
         headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
         files={"file": (filename, data)},
-        data={"model": "whisper-large-v3", "response_format": "json"},
+        data={"model": "whisper-large-v3", "language": "fa", "response_format": "json"},
+        
         timeout=120,
     )
     if r.status_code != 200:
